@@ -764,10 +764,8 @@ static int mount_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(m->deserialized_state, MOUNT_DEAD, MOUNT_FAILED)) {
+        if (!IN_SET(m->deserialized_state, MOUNT_DEAD, MOUNT_FAILED))
                 (void) unit_setup_exec_runtime(u);
-                (void) unit_setup_cgroup_runtime(u);
-        }
 
         mount_set_state(m, m->deserialized_state);
         return 0;
@@ -1832,7 +1830,7 @@ static int mount_setup_unit(
         assert(fstype);
 
         /* Ignore API and credential mount points. They should never be referenced in dependencies ever.
-         * Also check the comment for mount_point_is_credentials. */
+         * Also check the comment for mount_point_is_credentials(). */
         if (mount_point_is_api(where) || mount_point_ignore(where) || mount_point_is_credentials(m, where))
                 return 0;
 

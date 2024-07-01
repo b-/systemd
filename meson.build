@@ -547,6 +547,7 @@ decl_headers = '''
 #include <uchar.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sched.h>
 '''
 
 foreach decl : ['char16_t',
@@ -554,6 +555,7 @@ foreach decl : ['char16_t',
                 'struct mount_attr',
                 'struct statx',
                 'struct dirent64',
+                'struct sched_attr',
                ]
 
         # We get -1 if the size cannot be determined
@@ -601,6 +603,7 @@ foreach ident : [
                                  #include <unistd.h>'''],     # no known header declares pivot_root
         ['ioprio_get',        '''#include <sched.h>'''],      # no known header declares ioprio_get
         ['ioprio_set',        '''#include <sched.h>'''],      # no known header declares ioprio_set
+        ['sched_setattr',     '''#include <sched.h>'''],      # no known header declares sched_setattr
         ['name_to_handle_at', '''#include <sys/types.h>
                                  #include <sys/stat.h>
                                  #include <fcntl.h>'''],
@@ -723,7 +726,7 @@ gperf = find_program('gperf')
 
 gperf_test_format = '''
 #include <string.h>
-const char * in_word_set(const char *, @0@);
+const char* in_word_set(const char *, @0@);
 @1@
 '''
 gperf_snippet = run_command(sh, '-c', 'echo foo,bar | "$1" -L ANSI-C', '_', gperf,
@@ -1641,7 +1644,6 @@ foreach term : ['analyze',
                 'machined',
                 'mountfsd',
                 'networkd',
-                'nscd',
                 'nsresourced',
                 'nss-myhostname',
                 'nss-systemd',
@@ -1740,6 +1742,7 @@ if conf.get('BPF_FRAMEWORK') == 1
                 '-ffile-prefix-map=',
                 '-fdebug-prefix-map=',
                 '-fmacro-prefix-map=',
+                '--sysroot=',
         ]
 
         foreach opt : c_args
@@ -2056,6 +2059,7 @@ libsystemd_includes = [basic_includes, include_directories(
         'src/libsystemd/sd-hwdb',
         'src/libsystemd/sd-id128',
         'src/libsystemd/sd-journal',
+        'src/libsystemd/sd-json',
         'src/libsystemd/sd-netlink',
         'src/libsystemd/sd-network',
         'src/libsystemd/sd-resolve')]
@@ -2104,6 +2108,7 @@ install_libsystemd_static = static_library(
                         libdl,
                         libgcrypt_cflags,
                         liblz4_cflags,
+                        libm,
                         libmount,
                         libopenssl,
                         librt,
@@ -2649,12 +2654,6 @@ foreach executable : ['systemd-journal-remote', 'systemd-measure']
 endforeach
 
 if mkosi.found()
-        genkey = custom_target('genkey',
-                output : ['mkosi.key', 'mkosi.crt'],
-                command : [mkosi, '--force', 'genkey'],
-                depends : mkosi_depends,
-        )
-
         custom_target('mkosi',
                 build_always_stale : true,
                 build_by_default: false,
@@ -2666,14 +2665,10 @@ if mkosi.found()
                         '--output-dir', meson.current_build_dir() / 'mkosi.output',
                         '--cache-dir', meson.current_build_dir() / 'mkosi.cache',
                         '--build-dir', meson.current_build_dir() / 'mkosi.builddir',
-                        '--secure-boot-key', meson.current_build_dir() / 'mkosi.key',
-                        '--secure-boot-certificate', meson.current_build_dir() / 'mkosi.crt',
-                        '--verity-key', meson.current_build_dir() / 'mkosi.key',
-                        '--verity-certificate', meson.current_build_dir() / 'mkosi.crt',
                         '--force',
                         'build',
                 ],
-                depends : mkosi_depends + [genkey],
+                depends : mkosi_depends,
         )
 endif
 
@@ -3059,7 +3054,6 @@ foreach tuple : [
         ['dmi'],
         ['idn'],
         ['polkit'],
-        ['nscd'],
         ['legacy-pkla',            install_polkit_pkla],
         ['kmod'],
         ['xenctrl'],

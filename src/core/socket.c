@@ -272,12 +272,10 @@ static int socket_add_default_dependencies(Socket *s) {
 }
 
 static bool socket_has_exec(Socket *s) {
-        unsigned i;
-
         assert(s);
 
-        for (i = 0; i < _SOCKET_EXEC_COMMAND_MAX; i++)
-                if (s->exec_command[i])
+        FOREACH_ARRAY(i, s->exec_command, _SOCKET_EXEC_COMMAND_MAX)
+                if (*i)
                         return true;
 
         return false;
@@ -1615,7 +1613,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(Socket *, socket_close_fds, NULL);
 
 static int socket_open_fds(Socket *orig_s) {
         _cleanup_(socket_close_fdsp) Socket *s = orig_s;
-        _cleanup_(mac_selinux_freep) char *label = NULL;
+        _cleanup_freecon_ char *label = NULL;
         bool know_label = false;
         int r;
 
@@ -2825,8 +2823,7 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
                         log_unit_debug(u, "No matching ffs socket found: %s", value);
 
         } else if (streq(key, "trigger-ratelimit"))
-                deserialize_ratelimit(&s->trigger_limit, key, value);
-
+                (void) deserialize_ratelimit(&s->trigger_limit, key, value);
         else
                 log_unit_debug(UNIT(s), "Unknown serialization key: %s", key);
 
@@ -3413,7 +3410,7 @@ static int socket_get_timeout(Unit *u, usec_t *timeout) {
         return 1;
 }
 
-char *socket_fdname(Socket *s) {
+char* socket_fdname(Socket *s) {
         assert(s);
 
         /* Returns the name to use for $LISTEN_NAMES. If the user

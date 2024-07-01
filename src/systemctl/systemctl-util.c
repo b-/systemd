@@ -6,6 +6,7 @@
 #include "sd-bus.h"
 #include "sd-daemon.h"
 
+#include "ask-password-agent.h"
 #include "bus-common-errors.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
@@ -19,11 +20,10 @@
 #include "macro.h"
 #include "path-util.h"
 #include "pidref.h"
+#include "polkit-agent.h"
 #include "process-util.h"
 #include "reboot-util.h"
 #include "set.h"
-#include "spawn-ask-password-agent.h"
-#include "spawn-polkit-agent.h"
 #include "stat-util.h"
 #include "systemctl-util.h"
 #include "systemctl.h"
@@ -897,7 +897,7 @@ int output_table(Table *table) {
         assert(table);
 
         if (OUTPUT_MODE_IS_JSON(arg_output))
-                r = table_print_json(table, NULL, output_mode_to_json_format_flags(arg_output) | JSON_FORMAT_COLOR_AUTO);
+                r = table_print_json(table, NULL, output_mode_to_json_format_flags(arg_output) | SD_JSON_FORMAT_COLOR_AUTO);
         else
                 r = table_print(table, NULL);
         if (r < 0)
