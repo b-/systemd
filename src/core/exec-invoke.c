@@ -11,15 +11,9 @@
 #include <security/pam_misc.h>
 #endif
 
-#if HAVE_APPARMOR
-#include <sys/apparmor.h>
-#endif
-
 #include "sd-messages.h"
 
-#if HAVE_APPARMOR
 #include "apparmor-util.h"
-#endif
 #include "argv-util.h"
 #include "ask-password-api.h"
 #include "barrier.h"
@@ -2480,7 +2474,8 @@ static int setup_private_pids(const ExecContext *c, ExecParameters *p) {
         if (pipe2(errno_pipe, O_CLOEXEC) < 0)
                 return log_exec_debug_errno(c, p, errno, "Failed to create pipe for communicating with parent process: %m");
 
-        r = pidref_safe_fork("(sd-pidns-child)", FORK_NEW_PIDNS, &pidref);
+        /* Set FORK_DETACH to immediately re-parent the child process to the invoking manager process. */
+        r = pidref_safe_fork("(sd-pidns-child)", FORK_NEW_PIDNS|FORK_DETACH, &pidref);
         if (r < 0)
                 return log_exec_debug_errno(c, p, r, "Failed to fork child into new pid namespace: %m");
         if (r > 0) {
@@ -3619,7 +3614,8 @@ static int apply_working_directory(
                 const ExecContext *context,
                 const ExecParameters *params,
                 ExecRuntime *runtime,
-                const char *home) {
+                const char *pwent_home,
+                char * const *env) {
 
         const char *wd;
         int r;
@@ -3627,10 +3623,15 @@ static int apply_working_directory(
         assert(context);
 
         if (context->working_directory_home) {
-                if (!home)
-                        return -ENXIO;
+                /* Preferably use the data from $HOME, in case it was updated by a PAM module */
+                wd = strv_env_get(env, "HOME");
+                if (!wd) {
+                        /* If that's not available, use the data from the struct passwd entry: */
+                        if (!pwent_home)
+                                return -ENXIO;
 
-                wd = home;
+                        wd = pwent_home;
+                }
         } else
                 wd = empty_to_root(context->working_directory);
 
@@ -4393,7 +4394,7 @@ int exec_invoke(
         _cleanup_free_ gid_t *supplementary_gids = NULL;
         const char *username = NULL, *groupname = NULL;
         _cleanup_free_ char *home_buffer = NULL, *memory_pressure_path = NULL, *own_user = NULL;
-        const char *home = NULL, *shell = NULL;
+        const char *pwent_home = NULL, *shell = NULL;
         char **final_argv = NULL;
         dev_t journal_stream_dev = 0;
         ino_t journal_stream_ino = 0;
@@ -4645,7 +4646,7 @@ int exec_invoke(
                         u = NULL;
 
                 if (u) {
-                        r = get_fixed_user(u, &username, &uid, &gid, &home, &shell);
+                        r = get_fixed_user(u, &username, &uid, &gid, &pwent_home, &shell);
                         if (r < 0) {
                                 *exit_status = EXIT_USER;
                                 return log_exec_error_errno(context, params, r, "Failed to determine user credentials: %m");
@@ -4677,7 +4678,7 @@ int exec_invoke(
 
         params->user_lookup_fd = safe_close(params->user_lookup_fd);
 
-        r = acquire_home(context, &home, &home_buffer);
+        r = acquire_home(context, &pwent_home, &home_buffer);
         if (r < 0) {
                 *exit_status = EXIT_CHDIR;
                 return log_exec_error_errno(context, params, r, "Failed to determine $HOME for the invoking user: %m");
@@ -4983,7 +4984,7 @@ int exec_invoke(
                         params,
                         cgroup_context,
                         n_fds,
-                        home,
+                        pwent_home,
                         username,
                         shell,
                         journal_stream_dev,
@@ -5062,7 +5063,12 @@ int exec_invoke(
                 use_smack = mac_smack_use();
 #endif
 #if HAVE_APPARMOR
-                use_apparmor = mac_apparmor_use();
+                if (mac_apparmor_use()) {
+                        r = dlopen_libapparmor();
+                        if (r < 0 && !ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                                log_warning_errno(r, "Failed to load libapparmor, ignoring: %m");
+                        use_apparmor = r >= 0;
+                }
 #endif
         }
 
@@ -5505,7 +5511,7 @@ int exec_invoke(
          * running this service might have the correct privilege to change to the working directory. Also, it
          * is absolutely 💣 crucial 💣 we applied all mount namespacing rearrangements before this, so that
          * the cwd cannot be used to pin directories outside of the sandbox. */
-        r = apply_working_directory(context, params, runtime, home);
+        r = apply_working_directory(context, params, runtime, pwent_home, accum_env);
         if (r < 0) {
                 *exit_status = EXIT_CHDIR;
                 return log_exec_error_errno(context, params, r, "Changing to the requested working directory failed: %m");
@@ -5540,7 +5546,7 @@ int exec_invoke(
 
 #if HAVE_APPARMOR
                 if (use_apparmor && context->apparmor_profile) {
-                        r = aa_change_onexec(context->apparmor_profile);
+                        r = ASSERT_PTR(sym_aa_change_onexec)(context->apparmor_profile);
                         if (r < 0 && !context->apparmor_profile_ignore) {
                                 *exit_status = EXIT_APPARMOR_PROFILE;
                                 return log_exec_error_errno(context,

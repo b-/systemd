@@ -619,6 +619,29 @@ is allowed to edit.
 `selfModifiablePrivileged` →  Similar to `selfModifiableFields`, but it lists fields in
 the `privileged` section that the user is allowed to edit.
 
+`tmpLimit` → A numeric value encoding a disk quota limit in bytes enforced on
+`/tmp/` on login, in case it is backed by volatile file system (such as
+`tmpfs`).
+
+`tmpLimitScale` → Similar, but encodes a relative value, normalized to
+`UINT32_MAX` as 100%. This value is applied relative to the file system
+size. If both `tmpLimit` and `tmpLimitScale` are set, the lower of the two
+should be enforced. If neither field is set the implementation might apply a
+default limit.
+
+`devShmLimit`, `devShmLimitScale` → Similar to the previous two, but apply to
+`/dev/shm/` rather than `/tmp/`.
+
+`defaultArea` → The default home directory "area" to enter after logging
+in. Areas are named subdirectories below `~/Areas/` of the user, and can be used
+to maintain separate secondary home directories within the primary home
+directory of the user. Typically, a home directory "area" can be specified at
+login time, but if that's not done, and `defaultArea` is set, this area is
+selected. The value must be a string that qualifies as a valid filename. After
+login, the `$HOME` environment variable will point to `~/Areas/` of the user,
+suffixed by the selected area name, and `$XDG_AREA` will be set to the area
+string (unprefixed).
+
 `privileged` → An object, which contains the fields of the `privileged` section
 of the user record, see below.
 
@@ -761,22 +784,26 @@ These two are the only two fields specific to this section.
 All other fields that may be used in this section are identical to the equally named ones in the
 `regular` section (i.e. at the top-level object). Specifically, these are:
 
-`blobDirectory`, `blobManifest`, `iconName`, `location`, `shell`, `umask`, `environment`, `timeZone`,
-`preferredLanguage`, `additionalLanguages`, `niceLevel`, `resourceLimits`, `locked`, `notBeforeUSec`,
-`notAfterUSec`, `storage`, `diskSize`, `diskSizeRelative`, `skeletonDirectory`,
-`accessMode`, `tasksMax`, `memoryHigh`, `memoryMax`, `cpuWeight`, `ioWeight`,
+`blobDirectory`, `blobManifest`, `iconName`, `location`, `shell`, `umask`,
+`environment`, `timeZone`, `preferredLanguage`, `additionalLanguages`,
+`niceLevel`, `resourceLimits`, `locked`, `notBeforeUSec`, `notAfterUSec`,
+`storage`, `diskSize`, `diskSizeRelative`, `skeletonDirectory`, `accessMode`,
+`tasksMax`, `memoryHigh`, `memoryMax`, `cpuWeight`, `ioWeight`,
 `mountNoDevices`, `mountNoSuid`, `mountNoExecute`, `cifsDomain`,
 `cifsUserName`, `cifsService`, `cifsExtraMountOptions`, `imagePath`, `uid`,
 `gid`, `memberOf`, `fileSystemType`, `partitionUuid`, `luksUuid`,
 `fileSystemUuid`, `luksDiscard`, `luksOfflineDiscard`, `luksCipher`,
 `luksCipherMode`, `luksVolumeKeySize`, `luksPbkdfHashAlgorithm`,
-`luksPbkdfType`, `luksPbkdfForceIterations`, `luksPbkdfTimeCostUSec`, `luksPbkdfMemoryCost`,
-`luksPbkdfParallelThreads`, `luksSectorSize`, `autoResizeMode`, `rebalanceWeight`,
-`rateLimitIntervalUSec`, `rateLimitBurst`, `enforcePasswordPolicy`,
-`autoLogin`, `preferredSessionType`, `preferredSessionLauncher`, `stopDelayUSec`, `killProcesses`,
+`luksPbkdfType`, `luksPbkdfForceIterations`, `luksPbkdfTimeCostUSec`,
+`luksPbkdfMemoryCost`, `luksPbkdfParallelThreads`, `luksSectorSize`,
+`autoResizeMode`, `rebalanceWeight`, `rateLimitIntervalUSec`, `rateLimitBurst`,
+`enforcePasswordPolicy`, `autoLogin`, `preferredSessionType`,
+`preferredSessionLauncher`, `stopDelayUSec`, `killProcesses`,
 `passwordChangeMinUSec`, `passwordChangeMaxUSec`, `passwordChangeWarnUSec`,
 `passwordChangeInactiveUSec`, `passwordChangeNow`, `pkcs11TokenUri`,
-`fido2HmacCredential`, `selfModifiableFields`, `selfModifiableBlobs`, `selfModifiablePrivileged`.
+`fido2HmacCredential`, `selfModifiableFields`, `selfModifiableBlobs`,
+`selfModifiablePrivileged`, `tmpLimit`, `tmpLimitScale`, `devShmLimit`,
+`devShmLimitScale`.
 
 ## Fields in the `binding` section
 

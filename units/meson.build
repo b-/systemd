@@ -191,6 +191,11 @@ units = [
         { 'file' : 'remote-fs-pre.target' },
         { 'file' : 'remote-fs.target' },
         {
+          'file' : 'remote-integritysetup.target',
+          'conditions' : ['HAVE_LIBCRYPTSETUP'],
+          'symlinks' : ['initrd-root-device.target.wants/'],
+        },
+        {
           'file' : 'remote-veritysetup.target',
           'conditions' : ['HAVE_LIBCRYPTSETUP'],
           'symlinks' : ['initrd-root-device.target.wants/'],
@@ -383,6 +388,15 @@ units = [
           'symlinks' : ['sockets.target.wants/'],
         },
         {
+          'file' : 'imports-pre.target',
+          'conditions' : ['ENABLE_IMPORTD'],
+        },
+        {
+          'file' : 'imports.target',
+          'conditions' : ['ENABLE_IMPORTD'],
+          'symlinks' : ['sysinit.target.wants/'],
+        },
+        {
           'file' : 'systemd-initctl.service.in',
           'conditions' : ['HAVE_SYSV_COMPAT'],
         },
@@ -447,6 +461,7 @@ units = [
           'conditions' : ['ENABLE_LOGIND'],
           'symlinks' : ['multi-user.target.wants/', 'dbus-org.freedesktop.login1.service'],
         },
+        { 'file' : 'systemd-loop@.service' },
         {
           'file' : 'systemd-machine-id-commit.service',
           'symlinks' : ['sysinit.target.wants/'],

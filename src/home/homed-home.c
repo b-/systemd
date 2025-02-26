@@ -549,7 +549,6 @@ static int home_parse_worker_stdout(int _fd, UserRecord **ret) {
         _cleanup_close_ int fd = _fd; /* take possession, even on failure */
         _cleanup_(user_record_unrefp) UserRecord *hr = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        unsigned line, column;
         struct stat st;
         int r;
 
@@ -581,6 +580,7 @@ static int home_parse_worker_stdout(int _fd, UserRecord **ret) {
                 rewind(f);
         }
 
+        unsigned line = 0, column = 0;
         r = sd_json_parse_file(f, "stdout", SD_JSON_PARSE_SENSITIVE, &v, &line, &column);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse identity at %u:%u: %m", line, column);
@@ -689,6 +689,8 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_CANT_AUTHENTICATE, "Home %s has no password or other authentication mechanism defined.", h->user_name);
         case -EADDRINUSE:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_IN_USE, "Home %s is currently being used elsewhere.", h->user_name);
+        case -ENETUNREACH:
+                return sd_bus_error_setf(error, BUS_ERROR_HOME_ABSENT, "Backing storage for %s currently absent.", h->user_name);
         }
 
         return 0;

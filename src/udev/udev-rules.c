@@ -42,6 +42,7 @@
 #include "udev-trace.h"
 #include "udev-util.h"
 #include "udev-worker.h"
+#include "uid-classification.h"
 #include "user-util.h"
 #include "virt.h"
 
@@ -467,8 +468,8 @@ UdevRules* udev_rules_free(UdevRules *rules) {
         LIST_FOREACH(rule_files, i, rules->rule_files)
                 udev_rule_file_free(i);
 
-        hashmap_free_free_key(rules->known_users);
-        hashmap_free_free_key(rules->known_groups);
+        hashmap_free(rules->known_users);
+        hashmap_free(rules->known_groups);
         hashmap_free(rules->stats_by_path);
         return mfree(rules);
 }
@@ -489,24 +490,28 @@ static int rule_resolve_user(UdevRuleLine *rule_line, const char *name, uid_t *r
                 return 0;
         }
 
-        r = get_user_creds(&name, &uid, NULL, NULL, NULL, USER_CREDS_ALLOW_MISSING);
-        if (r < 0) {
-                if (IN_SET(r, -ENOENT, -ESRCH))
-                        log_line_error_errno(rule_line, r, "Unknown user '%s', ignoring.", name);
-                else
-                        log_line_error_errno(rule_line, r, "Failed to resolve user '%s', ignoring: %m", name);
-
-                *ret = UID_INVALID;
-                return 0;
-        }
+        r = get_user_creds(
+                        &name,
+                        &uid,
+                        /* ret_gid = */ NULL,
+                        /* ret_home = */ NULL,
+                        /* ret_shell = */ NULL,
+                        USER_CREDS_ALLOW_MISSING);
+        if (r == -ESRCH)
+                return log_line_error_errno(rule_line, r, "Unknown user '%s', ignoring.", name);
+        if (r < 0)
+                return log_line_error_errno(rule_line, r, "Failed to resolve user '%s', ignoring: %m", name);
+        if (!uid_is_system(uid))
+                return log_line_error_errno(rule_line, SYNTHETIC_ERRNO(EINVAL),
+                                            "User '%s' is not a system user (UID="UID_FMT"), ignoring.", name, uid);
 
         n = strdup(name);
         if (!n)
-                return -ENOMEM;
+                return log_oom();
 
-        r = hashmap_ensure_put(known_users, &string_hash_ops, n, UID_TO_PTR(uid));
+        r = hashmap_ensure_put(known_users, &string_hash_ops_free, n, UID_TO_PTR(uid));
         if (r < 0)
-                return r;
+                return log_oom();
 
         TAKE_PTR(n);
         *ret = uid;
@@ -530,23 +535,21 @@ static int rule_resolve_group(UdevRuleLine *rule_line, const char *name, gid_t *
         }
 
         r = get_group_creds(&name, &gid, USER_CREDS_ALLOW_MISSING);
-        if (r < 0) {
-                if (IN_SET(r, -ENOENT, -ESRCH))
-                        log_line_error_errno(rule_line, r, "Unknown group '%s', ignoring.", name);
-                else
-                        log_line_error_errno(rule_line, r, "Failed to resolve group '%s', ignoring: %m", name);
-
-                *ret = GID_INVALID;
-                return 0;
-        }
+        if (r == -ESRCH)
+                return log_line_error_errno(rule_line, r, "Unknown group '%s', ignoring.", name);
+        if (r < 0)
+                return log_line_error_errno(rule_line, r, "Failed to resolve group '%s', ignoring: %m", name);
+        if (!gid_is_system(gid))
+                return log_line_error_errno(rule_line, SYNTHETIC_ERRNO(EINVAL),
+                                            "Group '%s' is not a system group (GID="GID_FMT"), ignoring.", name, gid);
 
         n = strdup(name);
         if (!n)
-                return -ENOMEM;
+                return log_oom();
 
-        r = hashmap_ensure_put(known_groups, &string_hash_ops, n, GID_TO_PTR(gid));
+        r = hashmap_ensure_put(known_groups, &string_hash_ops_free, n, GID_TO_PTR(gid));
         if (r < 0)
-                return r;
+                return log_oom();
 
         TAKE_PTR(n);
         *ret = gid;
@@ -1042,13 +1045,18 @@ static int parse_token(
                         op = OP_ASSIGN;
                 }
 
-                if (parse_uid(value, &uid) >= 0)
+                if (parse_uid(value, &uid) >= 0) {
+                        if (!uid_is_system(uid))
+                                return log_line_error_errno(rule_line, SYNTHETIC_ERRNO(EINVAL),
+                                                            "UID="UID_FMT" is not in the system user range, ignoring.", uid);
+
                         r = rule_line_add_token(rule_line, TK_A_OWNER_ID, op, NULL, UID_TO_PTR(uid), /* is_case_insensitive = */ false, token_str);
-                else if (resolve_name_timing == RESOLVE_NAME_EARLY &&
+                } else if (resolve_name_timing == RESOLVE_NAME_EARLY &&
                            rule_get_substitution_type(value) == SUBST_TYPE_PLAIN) {
+
                         r = rule_resolve_user(rule_line, value, &uid);
                         if (r < 0)
-                                return log_line_error_errno(rule_line, r, "Failed to resolve user name '%s': %m", value);
+                                return r;
 
                         r = rule_line_add_token(rule_line, TK_A_OWNER_ID, op, NULL, UID_TO_PTR(uid), /* is_case_insensitive = */ false, token_str);
                 } else if (resolve_name_timing != RESOLVE_NAME_NEVER) {
@@ -1070,13 +1078,18 @@ static int parse_token(
                         op = OP_ASSIGN;
                 }
 
-                if (parse_gid(value, &gid) >= 0)
+                if (parse_gid(value, &gid) >= 0) {
+                        if (!gid_is_system(gid))
+                                return log_line_error_errno(rule_line, SYNTHETIC_ERRNO(EINVAL),
+                                                            "GID="GID_FMT" is not in the system group range, ignoring.", gid);
+
                         r = rule_line_add_token(rule_line, TK_A_GROUP_ID, op, NULL, GID_TO_PTR(gid), /* is_case_insensitive = */ false, token_str);
-                else if (resolve_name_timing == RESOLVE_NAME_EARLY &&
+                } else if (resolve_name_timing == RESOLVE_NAME_EARLY &&
                            rule_get_substitution_type(value) == SUBST_TYPE_PLAIN) {
+
                         r = rule_resolve_group(rule_line, value, &gid);
                         if (r < 0)
-                                return log_line_error_errno(rule_line, r, "Failed to resolve group name '%s': %m", value);
+                                return r;
 
                         r = rule_line_add_token(rule_line, TK_A_GROUP_ID, op, NULL, GID_TO_PTR(gid), /* is_case_insensitive = */ false, token_str);
                 } else if (resolve_name_timing != RESOLVE_NAME_NEVER) {
@@ -1631,10 +1644,8 @@ static void udev_check_rule_line(UdevRuleLine *line) {
 
 int udev_rules_parse_file(UdevRules *rules, const char *filename, bool extra_checks, UdevRuleFile **ret) {
         _cleanup_(udev_rule_file_freep) UdevRuleFile *rule_file = NULL;
-        _cleanup_free_ char *continuation = NULL, *name = NULL;
+        _cleanup_free_ char *name = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        bool ignore_line = false;
-        unsigned line_nr = 0;
         struct stat st;
         int r;
 
@@ -1685,6 +1696,9 @@ int udev_rules_parse_file(UdevRules *rules, const char *filename, bool extra_che
 
         LIST_APPEND(rule_files, rules->rule_files, rule_file);
 
+        _cleanup_free_ char *continuation = NULL;
+        unsigned line_nr = 0, current_line_nr = 0;
+        bool ignore_line = false;
         for (;;) {
                 _cleanup_free_ char *buf = NULL;
                 size_t len;
@@ -1696,7 +1710,10 @@ int udev_rules_parse_file(UdevRules *rules, const char *filename, bool extra_che
                 if (r == 0)
                         break;
 
-                line_nr++;
+                current_line_nr++;
+                if (!continuation)
+                        line_nr = current_line_nr;
+
                 line = skip_leading_chars(buf, NULL);
 
                 /* Lines beginning with '#' are ignored regardless of line continuation. */
@@ -1778,16 +1795,26 @@ UdevRules* udev_rules_new(ResolveNameTiming resolve_name_timing) {
         return rules;
 }
 
-int udev_rules_load(UdevRules **ret_rules, ResolveNameTiming resolve_name_timing) {
+int udev_rules_load(UdevRules **ret_rules, ResolveNameTiming resolve_name_timing, char * const *extra) {
         _cleanup_(udev_rules_freep) UdevRules *rules = NULL;
-        _cleanup_strv_free_ char **files = NULL;
+        _cleanup_strv_free_ char **files = NULL, **directories = NULL;
         int r;
 
         rules = udev_rules_new(resolve_name_timing);
         if (!rules)
                 return -ENOMEM;
 
-        r = conf_files_list_strv(&files, ".rules", NULL, 0, RULES_DIRS);
+        if (!strv_isempty(extra)) {
+                directories = strv_copy(extra);
+                if (!directories)
+                        return -ENOMEM;
+        }
+
+        r = strv_extend_strv(&directories, CONF_PATHS_STRV("udev/rules.d"), /* filter_duplicates = */ false);
+        if (r < 0)
+                return r;
+
+        r = conf_files_list_strv(&files, ".rules", NULL, 0, (const char* const*) directories);
         if (r < 0)
                 return log_debug_errno(r, "Failed to enumerate rules files: %m");
 
@@ -2509,7 +2536,7 @@ static int udev_rule_apply_token_to_event(
         case TK_M_IMPORT_CMDLINE: {
                 _cleanup_free_ char *value = NULL;
 
-                r = proc_cmdline_get_key(token->value, PROC_CMDLINE_VALUE_OPTIONAL|PROC_CMDLINE_IGNORE_EFI_OPTIONS, &value);
+                r = proc_cmdline_get_key(token->value, PROC_CMDLINE_VALUE_OPTIONAL, &value);
                 if (r < 0)
                         return log_event_error_errno(event, token, r,
                                                      "Failed to read \"%s\" option from /proc/cmdline: %m",
@@ -2559,25 +2586,19 @@ static int udev_rule_apply_token_to_event(
         case TK_A_OPTIONS_DUMP: {
                 log_event_info(event, token, "Dumping current state:");
 
-                if (event->event_mode == EVENT_UDEV_WORKER) {
-                        _cleanup_(memstream_done) MemStream m = {};
-                        FILE *f = memstream_init(&m);
-                        if (!f)
-                                return log_oom();
+                _cleanup_(memstream_done) MemStream m = {};
+                FILE *f = memstream_init(&m);
+                if (!f)
+                        return log_oom();
 
-                        dump_event(event, f);
+                (void) dump_event(event, SD_JSON_FORMAT_OFF, f);
 
-                        _cleanup_free_ char *buf = NULL;
-                        r = memstream_finalize(&m, &buf, NULL);
-                        if (r < 0)
-                                log_event_warning_errno(event, token, r, "Failed to finalize memory stream, ignoring: %m");
-                        else
-                                log_info("%s", buf);
-                } else {
-                        puts("============================");
-                        dump_event(event, NULL);
-                        puts("============================");
-                }
+                _cleanup_free_ char *buf = NULL;
+                r = memstream_finalize(&m, &buf, NULL);
+                if (r < 0)
+                        log_event_warning_errno(event, token, r, "Failed to finalize memory stream, ignoring: %m");
+                else
+                        log_info("%s", buf);
 
                 log_event_info(event, token, "DONE");
                 return true;
@@ -2644,13 +2665,24 @@ static int udev_rule_apply_token_to_event(
                 if (!apply_format_value(event, token, owner, sizeof(owner), "user name"))
                         return true;
 
-                r = get_user_creds(&ow, &event->uid, NULL, NULL, NULL, USER_CREDS_ALLOW_MISSING);
-                if (IN_SET(r, -ENOENT, -ESRCH))
+                uid_t uid;
+                r = get_user_creds(
+                                &ow,
+                                &uid,
+                                /* ret_gid = */ NULL,
+                                /* ret_home = */ NULL,
+                                /* ret_shell = */ NULL,
+                                USER_CREDS_ALLOW_MISSING);
+                if (r == -ESRCH)
                         log_event_error_errno(event, token, r, "Unknown user \"%s\", ignoring.", owner);
                 else if (r < 0)
                         log_event_error_errno(event, token, r, "Failed to resolve user \"%s\", ignoring: %m", owner);
-                else
+                else if (!uid_is_system(uid))
+                        log_event_error(event, token, "User \"%s\" is not a system user (UID="UID_FMT"), ignoring.", owner, uid);
+                else {
+                        event->uid = uid;
                         log_event_debug(event, token, "Set owner: %s(%u)", owner, event->uid);
+                }
                 return true;
         }
         case TK_A_GROUP: {
@@ -2666,13 +2698,18 @@ static int udev_rule_apply_token_to_event(
                 if (!apply_format_value(event, token, group, sizeof(group), "group name"))
                         return true;
 
-                r = get_group_creds(&gr, &event->gid, USER_CREDS_ALLOW_MISSING);
-                if (IN_SET(r, -ENOENT, -ESRCH))
+                gid_t gid;
+                r = get_group_creds(&gr, &gid, USER_CREDS_ALLOW_MISSING);
+                if (r == -ESRCH)
                         log_event_error_errno(event, token, r, "Unknown group \"%s\", ignoring.", group);
                 else if (r < 0)
                         log_event_error_errno(event, token, r, "Failed to resolve group \"%s\", ignoring: %m", group);
-                else
+                else if (!gid_is_system(gid))
+                        log_event_error(event, token, "Group \"%s\" is not a system group (GID="GID_FMT"), ignoring.", group, gid);
+                else {
+                        event->gid = gid;
                         log_event_debug(event, token, "Set group: %s(%u)", group, event->gid);
+                }
                 return true;
         }
         case TK_A_MODE: {
@@ -2746,9 +2783,9 @@ static int udev_rule_apply_token_to_event(
                         return log_oom();
 
                 if (token->op == OP_ASSIGN)
-                        ordered_hashmap_clear_free_free(event->seclabel_list);
+                        ordered_hashmap_clear(event->seclabel_list);
 
-                r = ordered_hashmap_ensure_put(&event->seclabel_list, NULL, name, label);
+                r = ordered_hashmap_ensure_put(&event->seclabel_list, &trivial_hash_ops_free_free, name, label);
                 if (r == -ENOMEM)
                         return log_oom();
                 if (r < 0)
@@ -2917,43 +2954,86 @@ static int udev_rule_apply_token_to_event(
         }
         case TK_A_ATTR: {
                 char buf[UDEV_PATH_SIZE], value[UDEV_NAME_SIZE];
-                const char *val, *key_name = token->data;
+                const char *key = token->data;
 
-                if (udev_resolve_subsys_kernel(key_name, buf, sizeof(buf), false) < 0 &&
-                    sd_device_get_syspath(dev, &val) >= 0) {
+                /* First, try to resolve "[<SUBSYSTEM>/<KERNEL>]<attribute>" format. */
+                r = udev_resolve_subsys_kernel(key, buf, sizeof(buf), false);
+                if (r == -ENOMEM)
+                        return log_oom();
+                if (ERRNO_IS_NEG_DEVICE_ABSENT(r)) {
+                        log_event_warning_errno(event, token, r, "Failed to resolve sysfs attribute \"%s\", ignoring: %m", key);
+                        return true;
+                }
+                if (r < 0) {
+                        /* If not, make the path to sysfs attribute absolute, to make '*' resolvable by attr_subst_subdir(). */
+                        const char *syspath;
+                        r = sd_device_get_syspath(dev, &syspath);
+                        if (r < 0)
+                                return log_event_error_errno(event, token, r, "Failed to get syspath: %m");
+
                         bool truncated;
-                        strscpyl_full(buf, sizeof(buf), &truncated, val, "/", key_name, NULL);
+                        strscpyl_full(buf, sizeof(buf), &truncated, syspath, "/", key, NULL);
                         if (truncated) {
                                 log_event_warning(event, token,
                                                   "The path to the attribute \"%s/%s\" is too long, refusing to set the attribute.",
-                                                  val, key_name);
+                                                  syspath, key);
+                                return true;
+                        }
+
+                        /* Resolve '*' in the path. */
+                        r = attr_subst_subdir(buf);
+                        if (r < 0) {
+                                log_event_error_errno(event, token, r, "Could not find file matches \"%s\", ignoring: %m", buf);
                                 return true;
                         }
                 }
 
-                r = attr_subst_subdir(buf);
+                /* Then, make the path relative again. This also checks if the path being inside of the sysfs. */
+                _cleanup_free_ char *resolved = NULL;
+                _cleanup_close_ int fd = -EBADF;
+                r = device_chase(dev, buf, /* flags = */ 0, &resolved, &fd);
                 if (r < 0) {
-                        log_event_error_errno(event, token, r, "Could not find file matches \"%s\", ignoring: %m", buf);
+                        log_event_error_errno(event, token, r, "Could not chase sysfs attribute \"%s\", ignoring: %m", buf);
                         return true;
                 }
 
+                /* Apply formatting to the value. */
                 if (!apply_format_value(event, token, value, sizeof(value), "attribute value"))
                         return true;
 
                 if (EVENT_MODE_DESTRUCTIVE(event)) {
-                        log_event_debug(event, token, "Writing \"%s\" to sysfs attribute \"%s\".", value, buf);
-                        r = write_string_file(buf, value,
-                                              WRITE_STRING_FILE_VERIFY_ON_FAILURE |
-                                              WRITE_STRING_FILE_DISABLE_BUFFER |
-                                              WRITE_STRING_FILE_AVOID_NEWLINE |
-                                              WRITE_STRING_FILE_VERIFY_IGNORE_NEWLINE);
+                        log_event_debug(event, token, "Writing \"%s\" to sysfs attribute \"%s\".", value, resolved);
+                        r = sd_device_set_sysattr_value(dev, resolved, value);
                         if (r < 0)
-                                log_event_error_errno(event, token, r, "Failed to write \"%s\" to sysfs attribute \"%s\", ignoring: %m", value, buf);
-                        else
+                                log_event_error_errno(event, token, r, "Failed to write \"%s\" to sysfs attribute \"%s\", ignoring: %m", value, resolved);
+                        else {
+                                event_cache_written_sysattr(event, resolved, value);
                                 log_event_done(event, token);
-                } else
-                        log_event_debug(event, token, "Running in test mode, skipping writing \"%s\" to sysfs attribute \"%s\".", value, buf);
+                        }
+                } else {
+                        log_event_debug(event, token, "Running in test mode, skipping writing \"%s\" to sysfs attribute \"%s\".", value, resolved);
 
+                        /* We assume the attribute is writable if the path points to a regular file, and cache
+                         * the value to make it shown by OPTIONS="dump" or obtained by later ATTR match token. */
+                        r = fd_verify_regular(fd);
+                        if (r < 0 && !ERRNO_IS_NEG_PRIVILEGE(r))
+                                log_event_error_errno(event, token, r, "Failed to verify sysfs attribute \"%s\" is a regular file: %m", resolved);
+                        else {
+                                event_cache_written_sysattr(event, resolved, value);
+
+                                _cleanup_free_ char *copied = strdup(value);
+                                if (!copied)
+                                        return log_oom();
+
+                                r = device_cache_sysattr_value(dev, resolved, value, /* error = */ 0);
+                                if (r < 0)
+                                        log_event_warning_errno(event, token, r, "Failed to cache sysfs attribute \"%s\", ignoring: %m", resolved);
+                                else if (r > 0) {
+                                        TAKE_PTR(resolved);
+                                        TAKE_PTR(copied);
+                                }
+                        }
+                }
                 return true;
         }
         case TK_A_SYSCTL: {
@@ -2972,11 +3052,23 @@ static int udev_rule_apply_token_to_event(
                         r = sysctl_write(buf, value);
                         if (r < 0)
                                 log_event_error_errno(event, token, r, "Failed to write \"%s\" to sysctl entry \"%s\", ignoring: %m", value, buf);
-                        else
+                        else {
+                                event_cache_written_sysctl(event, buf, value);
                                 log_event_done(event, token);
-                } else
+                        }
+                } else {
                         log_event_debug(event, token, "Running in test mode, skipping writing \"%s\" to sysctl entry \"%s\".", value, buf);
 
+                        _cleanup_free_ char *path = path_join("/proc/sys/", buf);
+                        if (!path)
+                                return log_oom();
+
+                        r = verify_regular_at(AT_FDCWD, path, /* follow = */ true);
+                        if (r < 0 && !ERRNO_IS_NEG_PRIVILEGE(r))
+                                log_event_error_errno(event, token, r, "Failed to verify sysctl entry \"%s\" is a regular file: %m", buf);
+                        else
+                                event_cache_written_sysctl(event, buf, value);
+                }
                 return true;
         }
         case TK_A_RUN_BUILTIN:
@@ -2991,7 +3083,7 @@ static int udev_rule_apply_token_to_event(
                         event->run_final = true;
 
                 if (IN_SET(token->op, OP_ASSIGN, OP_ASSIGN_FINAL))
-                        ordered_hashmap_clear_free_key(event->run_list);
+                        ordered_hashmap_clear(event->run_list);
 
                 if (!apply_format_value(event, token, buf, sizeof(buf), "command"))
                         return true;
@@ -3000,7 +3092,7 @@ static int udev_rule_apply_token_to_event(
                 if (!cmd)
                         return log_oom();
 
-                r = ordered_hashmap_ensure_put(&event->run_list, NULL, cmd, token->data);
+                r = ordered_hashmap_ensure_put(&event->run_list, &trivial_hash_ops_free, cmd, token->data);
                 if (r < 0)
                         return log_event_error_errno(event, token, r, "Failed to store command \"%s\": %m", cmd);
 

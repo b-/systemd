@@ -359,7 +359,6 @@ static int manager_add_home_by_record(
 
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
         _cleanup_(user_record_unrefp) UserRecord *hr = NULL;
-        unsigned line, column;
         int r, is_signed;
         struct stat st;
         Home *h;
@@ -379,6 +378,7 @@ static int manager_add_home_by_record(
         if (st.st_size == 0)
                 goto unlink_this_file;
 
+        unsigned line = 0, column = 0;
         r = sd_json_parse_file_at(NULL, dir_fd, fname, SD_JSON_PARSE_SENSITIVE, &v, &line, &column);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse identity record at %s:%u%u: %m", fname, line, column);
@@ -1455,6 +1455,8 @@ static int manager_generate_key_pair(Manager *m) {
         if (PEM_write_PUBKEY(fpublic, m->private_key) <= 0)
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to write public key.");
 
+        (void) fchmod(fileno(fpublic), 0444); /* Make public key world readable */
+
         r = fflush_sync_and_check(fpublic);
         if (r < 0)
                 return log_error_errno(r, "Failed to write private key: %m");
@@ -1468,6 +1470,8 @@ static int manager_generate_key_pair(Manager *m) {
 
         if (PEM_write_PrivateKey(fprivate, m->private_key, NULL, NULL, 0, NULL, NULL) <= 0)
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to write private key pair.");
+
+        (void) fchmod(fileno(fprivate), 0400); /* Make private key root readable */
 
         r = fflush_sync_and_check(fprivate);
         if (r < 0)
