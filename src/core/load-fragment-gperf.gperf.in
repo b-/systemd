@@ -73,7 +73,8 @@
 {{type}}.SystemCallErrorNumber,               config_parse_syscall_errno,                         0,                                  offsetof({{type}}, exec_context)
 {{type}}.SystemCallLog,                       config_parse_syscall_log,                           0,                                  offsetof({{type}}, exec_context)
 {{type}}.MemoryDenyWriteExecute,              config_parse_bool,                                  0,                                  offsetof({{type}}, exec_context.memory_deny_write_execute)
-{{type}}.RestrictNamespaces,                  config_parse_restrict_namespaces,                   0,                                  offsetof({{type}}, exec_context)
+{{type}}.RestrictNamespaces,                  config_parse_namespace_flags,                       0,                                  offsetof({{type}}, exec_context.restrict_namespaces)
+{{type}}.DelegateNamespaces,                  config_parse_namespace_flags,                       0,                                  offsetof({{type}}, exec_context.delegate_namespaces)
 {{type}}.RestrictRealtime,                    config_parse_bool,                                  0,                                  offsetof({{type}}, exec_context.restrict_realtime)
 {{type}}.RestrictSUIDSGID,                    config_parse_bool,                                  0,                                  offsetof({{type}}, exec_context.restrict_suid_sgid)
 {{type}}.RestrictAddressFamilies,             config_parse_address_families,                      0,                                  offsetof({{type}}, exec_context)
@@ -549,7 +550,6 @@ Mount.SloppyOptions,                          config_parse_bool,                
 Mount.LazyUnmount,                            config_parse_bool,                                  0,                                  offsetof(Mount, lazy_unmount)
 Mount.ForceUnmount,                           config_parse_bool,                                  0,                                  offsetof(Mount, force_unmount)
 Mount.ReadWriteOnly,                          config_parse_bool,                                  0,                                  offsetof(Mount, read_write_only)
-Mount.GracefulOptions,                        config_parse_mount_graceful_options,                0,                                  offsetof(Mount, graceful_options)
 {{ EXEC_CONTEXT_CONFIG_ITEMS('Mount') }}
 {{ CGROUP_CONTEXT_CONFIG_ITEMS('Mount') }}
 {{ KILL_CONTEXT_CONFIG_ITEMS('Mount') }}

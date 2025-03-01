@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 udevadm_sources = files(
+        'udevadm-cat.c',
         'udevadm-control.c',
         'udevadm-hwdb.c',
         'udevadm-info.c',
@@ -61,8 +62,9 @@ endif
 generate_keyboard_keys_list = find_program('generate-keyboard-keys-list.sh')
 keyboard_keys_list_txt = custom_target(
         'keyboard-keys-list.txt',
+        input : files('../basic/linux/input.h'),
         output : 'keyboard-keys-list.txt',
-        command : [generate_keyboard_keys_list, cpp],
+        command : [generate_keyboard_keys_list, cpp, '@INPUT@'],
         capture : true)
 
 generate_keyboard_keys_gperf = find_program('generate-keyboard-keys-gperf.sh')

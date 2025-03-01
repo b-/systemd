@@ -600,13 +600,14 @@ static int parse_one_option(const char *option) {
                  * - text descriptions prefixed with "%:" or "%keyring:".
                  * - text description with no prefix.
                  * - numeric keyring id (ignored in current patch set). */
-                if (IN_SET(*val, '@', '%'))
-                        keyring = strndup(val, sep - val);
-                else
-                        /* add type prefix if missing (crypt_set_keyring_to_link() expects it) */
-                        keyring = strnappend("%:", val, sep - val);
+                keyring = strndup(val, sep - val);
                 if (!keyring)
                         return log_oom();
+
+                /* add type prefix if missing (crypt_set_keyring_to_link() expects it) */
+                if (!IN_SET(*keyring, '@', '%'))
+                        if (!strprepend(&keyring, "%:"))
+                                return log_oom();
 
                 sep += 2;
 
@@ -1862,7 +1863,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                         r = acquire_tpm2_key(
                                         name,
                                         arg_tpm2_device,
-                                        arg_tpm2_pcr_mask == UINT32_MAX ? TPM2_PCR_MASK_DEFAULT : arg_tpm2_pcr_mask,
+                                        arg_tpm2_pcr_mask == UINT32_MAX ? TPM2_PCR_MASK_DEFAULT_LEGACY : arg_tpm2_pcr_mask,
                                         UINT16_MAX,
                                         /* pubkey= */ NULL,
                                         /* pubkey_pcr_mask= */ 0,

@@ -285,6 +285,7 @@ libefi_sources = files(
         'device-path-util.c',
         'devicetree.c',
         'drivers.c',
+        'efi-firmware.c',
         'efi-string.c',
         'efivars.c',
         'export-vars.c',
@@ -299,12 +300,14 @@ libefi_sources = files(
         'shim.c',
         'smbios.c',
         'ticks.c',
+        'url-discovery.c',
         'util.c',
         'vmm.c',
 )
 
 systemd_boot_sources = files(
         'boot.c',
+        'line-edit.c',
 )
 
 stub_sources = files(
@@ -450,7 +453,7 @@ foreach efi_elf_binary : efi_elf_binaries
         test('check-alignment-@0@'.format(name),
              check_efi_alignment_py,
              args : exe.full_path(),
-             suite : 'efi')
+             suite : 'boot')
 endforeach
 
 alias_target('systemd-boot', boot_targets)

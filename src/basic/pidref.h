@@ -43,7 +43,7 @@ struct PidRef {
 
 /* A special pidref value that we are using when a PID shall be automatically acquired from some surrounding
  * context, for example connection peer. Much like PIDREF_NULL it will be considered unset by
- * pidref_is_set().*/
+ * pidref_is_set(). */
 #define PIDREF_AUTOMATIC (const PidRef) { .pid = PID_AUTOMATIC, .fd = -EBADF }
 
 /* Turns a pid_t into a PidRef structure on-the-fly *without* acquiring a pidfd for it. (As opposed to
@@ -70,7 +70,7 @@ bool pidref_equal(PidRef *a, PidRef *b);
 int pidref_set_pid(PidRef *pidref, pid_t pid);
 int pidref_set_pidstr(PidRef *pidref, const char *pid);
 int pidref_set_pidfd(PidRef *pidref, int fd);
-int pidref_set_pidfd_take(PidRef *pidref, int fd); /* takes ownership of the passed pidfd on success*/
+int pidref_set_pidfd_take(PidRef *pidref, int fd); /* takes ownership of the passed pidfd on success */
 int pidref_set_pidfd_consume(PidRef *pidref, int fd); /* takes ownership of the passed pidfd in both success and failure */
 int pidref_set_parent(PidRef *ret);
 static inline int pidref_set_self(PidRef *pidref) {
@@ -107,6 +107,10 @@ static inline void pidref_done_sigkill_wait(PidRef *pidref) {
 int pidref_verify(const PidRef *pidref);
 
 #define TAKE_PIDREF(p) TAKE_GENERIC((p), PidRef, PIDREF_NULL)
+
+struct siphash;
+void pidref_hash_func(const PidRef *pidref, struct siphash *state);
+int pidref_compare_func(const PidRef *a, const PidRef *b);
 
 extern const struct hash_ops pidref_hash_ops;
 extern const struct hash_ops pidref_hash_ops_free; /* Has destructor call for pidref_free(), i.e. expects heap allocated PidRef as keys */
